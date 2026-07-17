@@ -161,7 +161,7 @@ function mergeSection(existing, fresh, capN) {
   const lim = cutoff();
   const all = [...news, ...existing].filter(x => (x.date || '9999') >= lim);
   all.sort((a, b) => (a.date < b.date ? 1 : -1));
-  return { list: all.slice(0, capN), added: news.length };
+  return { list: all.slice(0, capN), added: news.length, newItems: news };
 }
 
 function mergeVideos(existing, fresh) {
@@ -179,7 +179,7 @@ function mergeVideos(existing, fresh) {
   const uniq = [], s2 = new Set();
   for (const v of all) { if (s2.has(v.videoId)) continue; s2.add(v.videoId); uniq.push(v); }
   uniq.sort((a, b) => (a.publishedDate < b.publishedDate ? 1 : -1));
-  return { list: uniq.slice(0, CAP.videos), added: added.length };
+  return { list: uniq.slice(0, CAP.videos), added: added.length, newItems: added };
 }
 
 async function main() {
@@ -194,19 +194,38 @@ async function main() {
   const bySection = {}; TEXT_SECTIONS.forEach(s => bySection[s] = []);
   for (const it of feedItems) if (bySection[it.section]) bySection[it.section].push(it);
 
-  const report = [];
+  const SEC_LABEL = { novedades: 'Novedades', noticias: 'Noticias', empresas: 'Empresas', drive: 'Google Drive', unidades: 'Unidades compartidas', videos: 'Videos' };
+  const report = [], newTitles = [];
+  let totalAdded = 0;
   for (const s of TEXT_SECTIONS) {
     const r = mergeSection(data[s], bySection[s], CAP[s]);
-    data[s] = r.list; report.push(`${s}+${r.added}`);
+    data[s] = r.list; report.push(`${s}+${r.added}`); totalAdded += r.added;
+    r.newItems.forEach(it => newTitles.push('[' + SEC_LABEL[s] + '] ' + it.title));
   }
   const rv = mergeVideos(data.videos, vids);
-  data.videos = rv.list; report.push(`videos+${rv.added}`);
+  data.videos = rv.list; report.push(`videos+${rv.added}`); totalAdded += rv.added;
+  rv.newItems.forEach(v => newTitles.push('[Videos] ' + v.title));
 
   data.updatedISO = new Date().toISOString();
 
   await writeFile(DATA, JSON.stringify(data, null, 2));
   await writeFile(OUT, render(data));
-  console.log('OK ·', report.join(' '), '· total',
+
+  // Resumen para el correo (lo lee el workflow)
+  const SITE = process.env.SITE_URL || 'https://jairocarrizales.github.io/workspace-news/';
+  const body = [
+    totalAdded
+      ? 'Se agregaron ' + totalAdded + ' elementos nuevos a tu Portal de Google Workspace:'
+      : 'Tu Portal de Google Workspace se revisó (sin elementos nuevos hoy).',
+    '',
+    ...newTitles.slice(0, 25).map(t => '• ' + t),
+    '',
+    'Ábrelo aquí: ' + SITE,
+  ].join('\n');
+  await writeFile(join(ROOT, '_summary.txt'), body);
+  await writeFile(join(ROOT, '_new_count.txt'), String(totalAdded));
+
+  console.log('OK ·', report.join(' '), '· nuevos:', totalAdded, '· total',
     [...TEXT_SECTIONS, 'videos'].map(s => s + ':' + data[s].length).join(' '));
 }
 
