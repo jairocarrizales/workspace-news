@@ -1,0 +1,130 @@
+{
+  "updatedISO": "2026-07-17T17:48:15.151Z",
+  "novedades": [
+    {
+      "section": "novedades",
+      "title": "Regionalización de datos para la app de Gemini",
+      "summary": "La app de Gemini admite ahora almacenamiento y procesamiento de datos por región (UE/EE. UU.) según los requisitos de cada organización.",
+      "url": "https://workspaceupdates.googleblog.com/2026/07/weekly-recap-07-03-2026.html",
+      "source": "Google Workspace Updates",
+      "image": "",
+      "date": "2026-07-17",
+      "icon": "🌎",
+      "accent": "#34a853"
+    },
+    {
+      "section": "novedades",
+      "title": "Privilegios de MDM por unidad organizativa",
+      "summary": "Los administradores ya pueden asignar privilegios de gestión de dispositivos móviles a unidades organizativas específicas, limitando el alcance del acceso.",
+      "url": "https://workspaceupdates.googleblog.com/2026/07/weekly-recap-07-03-2026.html",
+      "source": "Google Workspace Updates",
+      "image": "",
+      "date": "2026-07-17",
+      "icon": "📱",
+      "accent": "#5f6368"
+    },
+    {
+      "section": "novedades",
+      "title": "Controles de gobernanza para agentes de IA",
+      "summary": "Cloud Next 2026 presentó nuevas herramientas de administración, incluido un centro de control de IA para monitorear y auditar el acceso de los agentes a los datos y reducir riesgos de seguridad.",
+      "url": "https://workspace.google.com/blog/product-announcements/10-more-announcements-workspace-at-next-2026",
+      "source": "Google Workspace Blog",
+      "image": "",
+      "date": "2026-07-17",
+      "icon": "🛡️",
+      "accent": "#ea4335"
+    },
+    {
+      "section": "novedades",
+      "title": "Alertas ampliadas de restablecimiento de contraseña para todos los roles de admin",
+      "summary": "El Alert Center ahora notifica a los administradores cuando cambia la contraseña de cualquier rol de administrador, no solo de super admins. Está activado por defecto y reemplaza la regla anterior; despliegue gradual desde el 22 de junio de 2026.",
+      "url": "https://workspaceupdates.googleblog.com/2026/06/enhanced-security-monitoring-with-expanded-Admin-password-reset-alerts.html",
+      "source": "Google Workspace Updates",
+      "image": "",
+      "date": "2026-07-17",
+      "icon": "🔐",
+      "accent": "#ea4335"
+    },
+    {
+      "section": "novedades",
+      "title": "Sheets suma importación desde HubSpot y Salesforce y tableros interactivos",
+      "summary": "Nuevas capacidades en Google Sheets: importar datos de terceros como HubSpot y Salesforce y crear visualizaciones interactivas (dashboards y tableros kanban) con Sheets canvas.",
+      "url": "https://workspace.google.com/blog/product-announcements/10-more-announcements-workspace-at-next-2026",
+      "source": "Google Workspace Blog",
+      "image": "",
+      "date": "2026-07-17",
+      "icon": "📊",
+      "accent": "#34a853"
+    },
+    {
+      "section": "novedades",
+      "title": "Workspace Intelligence: comprensión unificada para el trabajo con agentes",
+      "summary": "Presentado en Cloud Next 2026, conecta las apps de Workspace y su conocimiento de dominio para dar contexto en tiempo real a los flujos de trabajo con agentes de IA.",
+      "url": "https://workspace.google.com/blog/product-announcements/10-more-announcements-workspace-at-next-2026",
+      "source": "Google Workspace Blog",
+      "image": "",
+      "date": "2026-07-17",
+      "icon": "🧠",
+      "accent": "#4285f4"
+    },
+    {
+      "section": "novedades",
+      "title": "\"Take Notes for Me\" de Meet captura reuniones presenciales, Zoom y Teams",
+      "summary": "Anunciado en Cloud Next 2026: la toma de notas automática de Meet se amplía para resumir y extraer acciones de reuniones presenciales y de plataformas de terceros, volcándolas a Google Docs.",
+      "url": "https://workspace.google.com/blog/product-announcements/10-more-announcements-workspace-at-next-2026",
+      "source": "Google Workspace Blog",
+      "image": "",
+      "date": "2026-07-17",
+      "icon": "🎥",
+      "accent": "#1a73e8"
+    },
+    {
+      "section": "novedades",
+      "title": "Gmail delegado ahora funciona en móvil",
+      "summary": "Los delegados pueden leer, gestionar y redactar correos por cuenta de otra persona directamente desde las apps de Gmail para iOS y Android.",
+      "url": "https://workspaceupdates.googleblog.com/2026/07/weekly-recap-07-03-2026.html",
+      "source": "Google Workspace Updates",
+      "image": "",
+      "date": "2026-07-17",
+      "icon": "✉️",
+      "accent": "#ea4335"
+    },
+    {
+      "section": "novedades",
+      "title": "\"Ask Gemini\" llega a la app de Drive en móvil",
+      "summary": "La función para preguntarle a Gemini sobre tus archivos, antes solo en web, ya está disponible en las apps de Google Drive para iOS y Android.",
+      "url": "https://workspaceupdates.googleblog.com/2026/07/weekly-recap-07-03-2026.html",
+      "source": "Google Workspace Updates",
+      "image": "",
+      "date": "2026-07-17",
+      "icon": "📁",
+      "accent": "#1a73e8"
+    },
+    {
+      "section": "novedades",
+      "title": "Crea presentaciones completas con Gemini en Google Slides",
+      "summary": "Gemini ahora genera presentaciones de varias diapositivas en Slides, basadas en el contenido de tu Drive y con estilos que combinan automáticamente.",
+      "url": "https://workspaceupdates.googleblog.com/2026/07/weekly-recap-07-03-2026.html",
+      "source": "Google Workspace Updates",
+      "image": "",
+      "date": "2026-07-17",
+      "icon": "🎞️",
+      "accent": "#fbbc04"
+    }
+  ],
+  "noticias": [],
+  "empresas": [
+    {
+      "section": "empresas",
+      "title": "Cognizant despliega Google Workspace y Gemini Enterprise para 100,000 empleados",
+      "summary": "Cognizant amplió su alianza con Google Cloud para implementar Gemini Enterprise y Google Workspace en toda la empresa, con meta de llegar a 100,000 asociados este año y escalar a 200,000, certificando al menos a 10,000 profesionales. Sus equipos de desarrollo reportan hasta 30% más velocidad.",
+      "url": "https://news.cognizant.com/2026-07-07-Cognizant-expands-partnership-with-Google-Cloud-to-accelerate-enterprise-AI-adoption-with-Gemini-Enterprise-and-Google-Workspace",
+      "source": "Cognizant Newsroom",
+      "image": "",
+      "date": "2026-07-17",
+      "icon": "🏢",
+      "accent": "#34a853"
+    }
+  ],
+  "videos": []
+}
