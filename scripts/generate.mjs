@@ -221,8 +221,9 @@ async function main() {
     ...newTitles.slice(0, 25).map(t => '• ' + t),
     '',
     'Ábrelo aquí: ' + SITE,
+    '',
   ].join('\n');
-  await writeFile(join(ROOT, '_summary.txt'), body);
+  await writeFile(join(ROOT, '_summary.txt'), body + '\n');
   await writeFile(join(ROOT, '_new_count.txt'), String(totalAdded));
 
   console.log('OK ·', report.join(' '), '· nuevos:', totalAdded, '· total',

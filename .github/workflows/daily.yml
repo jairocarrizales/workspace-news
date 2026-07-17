@@ -61,6 +61,7 @@ jobs:
           {
             echo 'BODY<<__EOF__'
             cat _summary.txt
+            echo ''
             echo '__EOF__'
           } >> "$GITHUB_ENV"
 
