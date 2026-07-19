@@ -1,4 +1,4 @@
-name: Diario Google Workspace
+name: Portal Google Workspace
 
 on:
   schedule:
@@ -12,12 +12,15 @@ permissions:
   contents: write
 
 concurrency:
-  group: diario
+  group: portal
   cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    # true solo si los 3 secrets del correo están configurados
+    env:
+      HAS_MAIL: ${{ secrets.MAIL_USERNAME != '' && secrets.MAIL_PASSWORD != '' && secrets.MAIL_TO != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,7 +31,13 @@ jobs:
           node-version: "20"
 
       - name: Generar portal
+        env:
+          SITE_URL: "https://jairocarrizales.github.io/workspace-news/"
         run: node scripts/generate.mjs
+
+      - name: Leer novedades
+        id: count
+        run: echo "new=$(cat _new_count.txt 2>/dev/null || echo 0)" >> "$GITHUB_OUTPUT"
 
       - name: Publicar cambios
         run: |
@@ -38,6 +47,34 @@ jobs:
           if git diff --cached --quiet; then
             echo "Sin cambios hoy."
           else
-            git commit -m "Diario Google Workspace: $(date -u +%Y-%m-%d)"
+            git commit -m "Portal Google Workspace: $(date -u +%Y-%m-%d)"
             git push
           fi
+
+      # --- Correo cuando hay algo NUEVO -------------------------------------
+      # Solo se envía si hubo elementos nuevos Y si configuraste los secrets
+      # MAIL_USERNAME / MAIL_PASSWORD / MAIL_TO. Si no, este paso se salta
+      # (no marca error) y la web se actualiza igual.
+      - name: Preparar cuerpo del correo
+        if: ${{ steps.count.outputs.new != '0' && env.HAS_MAIL == 'true' }}
+        run: |
+          {
+            echo 'BODY<<__EOF__'
+            cat _summary.txt
+            echo ''
+            echo '__EOF__'
+          } >> "$GITHUB_ENV"
+
+      - name: Enviar correo de aviso
+        if: ${{ steps.count.outputs.new != '0' && env.HAS_MAIL == 'true' }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          from: Portal Workspace <${{ secrets.MAIL_USERNAME }}>
+          to: ${{ secrets.MAIL_TO }}
+          subject: "Portal Workspace actualizado — ${{ steps.count.outputs.new }} novedades"
+          body: ${{ env.BODY }}

@@ -18,13 +18,37 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { pbkdf2Sync, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+
+// --- Cifrado opcional (login) -----------------------------------------------
+// Si PORTAL_USER y PORTAL_PASSWORD están definidos, el contenido se cifra con
+// AES-256-GCM y una llave derivada (PBKDF2-SHA256) de usuario+contraseña. El
+// repo queda solo con texto cifrado; el navegador lo descifra con WebCrypto.
+const PBKDF2_ITERS = 150000;
+function encPayload(str, user, pass) {
+  const salt = randomBytes(16), iv = randomBytes(12);
+  const key = pbkdf2Sync(user + '\n' + pass, salt, PBKDF2_ITERS, 32, 'sha256');
+  const c = createCipheriv('aes-256-gcm', key, iv);
+  const ct = Buffer.concat([c.update(str, 'utf8'), c.final()]);
+  const tag = c.getAuthTag();
+  return { salt: salt.toString('base64'), iv: iv.toString('base64'), data: Buffer.concat([ct, tag]).toString('base64') };
+}
+function decPayload(p, user, pass) {
+  const salt = Buffer.from(p.salt, 'base64'), iv = Buffer.from(p.iv, 'base64'), buf = Buffer.from(p.data, 'base64');
+  const ct = buf.subarray(0, buf.length - 16), tag = buf.subarray(buf.length - 16);
+  const key = pbkdf2Sync(user + '\n' + pass, salt, PBKDF2_ITERS, 32, 'sha256');
+  const d = createDecipheriv('aes-256-gcm', key, iv); d.setAuthTag(tag);
+  return Buffer.concat([d.update(ct), d.final()]).toString('utf8');
+}
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = join(ROOT, 'data.json');
 const OUT = join(ROOT, 'index.html');
 const DAYS_TO_KEEP = 45;
+const VIDEO_MAX_AGE_DAYS = 7;   // los videos no pueden ser más viejos que esto
 const MAX_PER_FEED = 10;
-const CAP = { novedades: 60, noticias: 60, empresas: 40, videos: 30 };
+const CAP = { novedades: 60, noticias: 60, empresas: 40, drive: 50, unidades: 40, videos: 30 };
+const TEXT_SECTIONS = ['novedades', 'noticias', 'empresas', 'drive', 'unidades'];
 
 const FEEDS = [
   { section: 'novedades', source: 'Google Workspace Updates', url: 'https://workspaceupdates.googleblog.com/feeds/posts/default?alt=rss' },
@@ -32,6 +56,10 @@ const FEEDS = [
   { section: 'noticias',  source: 'Google News',              url: 'https://news.google.com/rss/search?q=%22Google%20Workspace%22%20when:14d&hl=es-419&gl=MX&ceid=MX:es' },
   { section: 'noticias',  source: 'Google News',              url: 'https://news.google.com/rss/search?q=%22Google%20Workspace%22%20(Gemini%20OR%20update%20OR%20feature)&hl=en-US&gl=US&ceid=US:en' },
   { section: 'empresas',  source: 'Google News',              url: 'https://news.google.com/rss/search?q=%22Google%20Workspace%22%20(enterprise%20OR%20empresa%20OR%20adopts%20OR%20deploys%20OR%20migration%20OR%20customer)&hl=es-419&gl=MX&ceid=MX:es' },
+  { section: 'drive',     source: 'Google News',              url: 'https://news.google.com/rss/search?q=%22Google%20Drive%22%20(update%20OR%20feature%20OR%20Workspace%20OR%20almacenamiento%20OR%20Gemini)&hl=es-419&gl=MX&ceid=MX:es' },
+  { section: 'drive',     source: 'Google Workspace Updates', url: 'https://workspaceupdates.googleblog.com/feeds/posts/default/-/Drive?alt=rss' },
+  { section: 'unidades',  source: 'Google News',              url: 'https://news.google.com/rss/search?q=(%22Shared%20Drives%22%20OR%20%22Unidades%20compartidas%22)%20Google&hl=es-419&gl=MX&ceid=MX:es' },
+  { section: 'unidades',  source: 'Google Workspace Updates', url: 'https://workspaceupdates.googleblog.com/feeds/posts/default/-/Shared%20drives?alt=rss' },
 ];
 
 const YT_QUERIES = [
@@ -41,9 +69,11 @@ const YT_QUERIES = [
 ];
 
 const THEME = {
-  novedades: { icon: '✨', accent: '#1a73e8' },
-  noticias:  { icon: '📰', accent: '#a142f4' },
-  empresas:  { icon: '🏢', accent: '#34a853' },
+  novedades: { accent: '#1a73e8' },
+  noticias:  { accent: '#a142f4' },
+  empresas:  { accent: '#34a853' },
+  drive:     { accent: '#0f9d58' },
+  unidades:  { accent: '#f9ab00' },
 };
 
 // --- XML helpers (sin dependencias) -----------------------------------------
@@ -99,19 +129,23 @@ async function fetchYouTube(query) {
     JSON.stringify(data, (k, v) => {
       if (v && v.videoRenderer && v.videoRenderer.videoId) {
         const vr = v.videoRenderer;
+        const when = (vr.publishedTimeText && vr.publishedTimeText.simpleText) || '';
+        const age = ageDaysFromText(when);
         out.push({
           section: 'videos',
           videoId: vr.videoId,
           title: (vr.title && vr.title.runs && vr.title.runs[0].text) || '',
           channel: (vr.ownerText && vr.ownerText.runs && vr.ownerText.runs[0].text) || (vr.longBylineText && vr.longBylineText.runs && vr.longBylineText.runs[0].text) || '',
-          when: (vr.publishedTimeText && vr.publishedTimeText.simpleText) || '',
+          when: when,
           url: 'https://www.youtube.com/watch?v=' + vr.videoId,
-          date: todayMX(),
+          publishedDate: age == null ? null : dateMinusDays(age),
+          firstSeen: todayMX(),
         });
       }
       return v;
     });
-    return out.filter(v => v.title).slice(0, 8);
+    // Solo videos con antigüedad conocida y <= 1 semana
+    return out.filter(v => v.title && v.publishedDate && daysSince(v.publishedDate) <= VIDEO_MAX_AGE_DAYS);
   } catch (e) { console.warn('yt', query, e.message); return []; }
 }
 
@@ -119,60 +153,128 @@ async function fetchYouTube(query) {
 function keyOf(n) { return (n.title || '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 90); }
 function todayMX() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); }
 function cutoff() { const d = new Date(); d.setDate(d.getDate() - DAYS_TO_KEEP); return d.toISOString().slice(0, 10); }
+function dateMinusDays(n) { const d = new Date(); d.setDate(d.getDate() - Math.round(n)); return d.toISOString().slice(0, 10); }
+function daysSince(iso) { const d = new Date(iso + 'T00:00:00Z'); return Math.floor((Date.now() - d.getTime()) / 86400000); }
+// Convierte "hace 3 días" / "3 days ago" / "hace 2 semanas" a número de días (o null)
+function ageDaysFromText(t) {
+  if (!t) return null;
+  t = t.toLowerCase();
+  const m = t.match(/(\d+)\s*(minut|hora|hour|min|día|dia|day|semana|week|mes|month|año|ano|year)/);
+  if (!m) { if (/hace un|hace una|a day|an hour|a week|a month|a year/.test(t)) { /* ~1 */ } else return null; }
+  const n = m ? parseInt(m[1], 10) : 1;
+  const u = m ? m[2] : (/week/.test(t) ? 'week' : /month/.test(t) ? 'month' : /year/.test(t) ? 'year' : 'day');
+  if (/minut|min|hora|hour/.test(u)) return 0;
+  if (/semana|week/.test(u)) return n * 7;
+  if (/mes|month/.test(u)) return n * 30;
+  if (/año|ano|year/.test(u)) return n * 365;
+  return n; // días
+}
 
 function mergeSection(existing, fresh, capN) {
-  const seen = new Set(existing.map(k => k.videoId || keyOf(k)));
+  const seen = new Set(existing.map(keyOf));
   const news = [];
   for (const n of fresh) {
-    const id = n.videoId || keyOf(n);
+    const id = keyOf(n);
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    if (!n.videoId) { const t = THEME[n.section]; if (t) { n.icon = t.icon; n.accent = t.accent; } }
+    const t = THEME[n.section]; if (t) n.accent = t.accent;
     news.push(n);
   }
   const lim = cutoff();
   const all = [...news, ...existing].filter(x => (x.date || '9999') >= lim);
   all.sort((a, b) => (a.date < b.date ? 1 : -1));
-  return { list: all.slice(0, capN), added: news.length };
+  return { list: all.slice(0, capN), added: news.length, newItems: news };
+}
+
+function mergeVideos(existing, fresh) {
+  const seen = new Set(existing.map(v => v.videoId));
+  const added = [];
+  for (const v of fresh) { if (!v.videoId || seen.has(v.videoId)) continue; seen.add(v.videoId); added.push(v); }
+  let all = [...added, ...existing].filter(v => {
+    let pd = v.publishedDate;
+    if (!pd && v.when) { const a = ageDaysFromText(v.when); if (a != null) pd = dateMinusDays(a); }
+    if (!pd) return false;
+    v.publishedDate = pd;
+    if (!v.firstSeen) v.firstSeen = v.date || todayMX();
+    return daysSince(pd) <= VIDEO_MAX_AGE_DAYS;
+  });
+  const uniq = [], s2 = new Set();
+  for (const v of all) { if (s2.has(v.videoId)) continue; s2.add(v.videoId); uniq.push(v); }
+  uniq.sort((a, b) => (a.publishedDate < b.publishedDate ? 1 : -1));
+  return { list: uniq.slice(0, CAP.videos), added: added.length, newItems: added };
 }
 
 async function main() {
+  const USER = process.env.PORTAL_USER || '';
+  const PASS = process.env.PORTAL_PASSWORD || '';
+  const LOCKED = !!(USER && PASS);
+
   let data = {};
-  try { data = JSON.parse(await readFile(DATA, 'utf8')); } catch {}
-  for (const s of ['novedades', 'noticias', 'empresas', 'videos']) if (!Array.isArray(data[s])) data[s] = [];
+  try {
+    const raw = JSON.parse(await readFile(DATA, 'utf8'));
+    if (raw && raw.enc) {
+      if (LOCKED) {
+        try { data = JSON.parse(decPayload(raw.enc, USER, PASS)); }
+        catch (e) { console.warn('No se pudo descifrar data.json (¿cambiaron las credenciales?). Empiezo con historial vacío.'); data = {}; }
+      } else { console.warn('data.json está cifrado pero no hay PORTAL_USER/PORTAL_PASSWORD; empiezo vacío.'); data = {}; }
+    } else { data = raw || {}; }
+  } catch {}
+  for (const s of [...TEXT_SECTIONS, 'videos']) if (!Array.isArray(data[s])) data[s] = [];
 
   const feedItems = (await Promise.all(FEEDS.map(fetchFeed))).flat();
   const vids = (await Promise.all(YT_QUERIES.map(fetchYouTube))).flat();
 
-  // dedup global de noticias por título entre secciones de texto
-  const bySection = { novedades: [], noticias: [], empresas: [] };
-  const globalSeen = new Set();
-  for (const it of feedItems) {
-    const k = keyOf(it);
-    if (globalSeen.has(k)) continue;
-    globalSeen.add(k);
-    bySection[it.section].push(it);
-  }
+  // agrupa por sección (cada sección deduplica por su cuenta)
+  const bySection = {}; TEXT_SECTIONS.forEach(s => bySection[s] = []);
+  for (const it of feedItems) if (bySection[it.section]) bySection[it.section].push(it);
 
-  let report = [];
-  for (const s of ['novedades', 'noticias', 'empresas']) {
+  const SEC_LABEL = { novedades: 'Novedades', noticias: 'Noticias', empresas: 'Empresas', drive: 'Google Drive', unidades: 'Unidades compartidas', videos: 'Videos' };
+  const report = [], newTitles = [];
+  let totalAdded = 0;
+  for (const s of TEXT_SECTIONS) {
     const r = mergeSection(data[s], bySection[s], CAP[s]);
-    data[s] = r.list; report.push(`${s}+${r.added}`);
+    data[s] = r.list; report.push(`${s}+${r.added}`); totalAdded += r.added;
+    r.newItems.forEach(it => newTitles.push('[' + SEC_LABEL[s] + '] ' + it.title));
   }
-  const rv = mergeSection(data.videos, vids, CAP.videos);
-  data.videos = rv.list; report.push(`videos+${rv.added}`);
+  const rv = mergeVideos(data.videos, vids);
+  data.videos = rv.list; report.push(`videos+${rv.added}`); totalAdded += rv.added;
+  rv.newItems.forEach(v => newTitles.push('[Videos] ' + v.title));
 
   data.updatedISO = new Date().toISOString();
 
-  await writeFile(DATA, JSON.stringify(data, null, 2));
-  await writeFile(OUT, render(data));
-  console.log('OK ·', report.join(' '), '· total',
-    ['novedades', 'noticias', 'empresas', 'videos'].map(s => s + ':' + data[s].length).join(' '));
+  if (LOCKED) {
+    const enc = encPayload(JSON.stringify(data), USER, PASS);
+    await writeFile(DATA, JSON.stringify({ enc }, null, 2));
+    await writeFile(OUT, render(null, enc));
+  } else {
+    await writeFile(DATA, JSON.stringify(data, null, 2));
+    await writeFile(OUT, render(data, null));
+  }
+
+  // Resumen para el correo (lo lee el workflow)
+  const SITE = process.env.SITE_URL || 'https://jairocarrizales.github.io/workspace-news/';
+  const body = [
+    totalAdded
+      ? 'Se agregaron ' + totalAdded + ' elementos nuevos a tu Portal de Google Workspace:'
+      : 'Tu Portal de Google Workspace se revisó (sin elementos nuevos hoy).',
+    '',
+    ...newTitles.slice(0, 25).map(t => '• ' + t),
+    '',
+    'Ábrelo aquí: ' + SITE,
+    '',
+  ].join('\n');
+  await writeFile(join(ROOT, '_summary.txt'), body + '\n');
+  await writeFile(join(ROOT, '_new_count.txt'), String(totalAdded));
+
+  console.log('OK ·', report.join(' '), '· nuevos:', totalAdded, '· total',
+    [...TEXT_SECTIONS, 'videos'].map(s => s + ':' + data[s].length).join(' '));
 }
 
-function render(data) {
-  const json = JSON.stringify(data).replace(/</g, '\\u003c');
-  return TEMPLATE.replace('/*__DATA__*/null', json);
+function render(plain, enc) {
+  let out = TEMPLATE;
+  out = out.replace('/*__DATA__*/null', plain ? JSON.stringify(plain).replace(/</g, '\\u003c') : 'null');
+  out = out.replace('/*__ENC__*/null', enc ? JSON.stringify(enc).replace(/</g, '\\u003c') : 'null');
+  return out;
 }
 
 const TEMPLATE = String.raw`<!DOCTYPE html>
@@ -244,6 +346,15 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
   .metar .src{color:var(--blue);font-weight:600}
   .metar .dt{color:#9aa2b1}
   .esbadge{align-self:flex-start;font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--purple);background:#a142f416;padding:2px 7px;border-radius:999px;text-transform:uppercase}
+  .actions{position:absolute;top:8px;right:8px;display:flex;gap:6px;z-index:3}
+  .abtn{width:28px;height:28px;border-radius:50%;background:var(--tagbg);border:0;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--muted);box-shadow:0 1px 5px rgba(0,0,0,.18);transition:.15s;padding:0}
+  .abtn:hover{color:var(--ink);transform:scale(1.08)}
+  .abtn.fav.on{color:#f5a623}
+  .abtn.fav.on svg{fill:#f5a623}
+  .nuevo{font-size:10px;font-weight:800;letter-spacing:.5px;color:#fff;background:var(--green);padding:3px 9px;border-radius:999px;text-transform:uppercase;box-shadow:0 1px 5px rgba(0,0,0,.25)}
+  .vhead{position:absolute;top:8px;left:8px;z-index:3}
+  .vage{font-size:12px;color:#9aa2b1;margin-top:4px}
+  .favsep{font-size:14px;font-weight:600;color:var(--muted);margin:26px 0 4px;padding-bottom:8px;border-bottom:1px solid var(--line)}
 
   /* Videos */
   .vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:20px}
@@ -278,6 +389,16 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
   .hint{font-size:11.5px;color:#9aa2b1;margin-top:10px}
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;z-index:60;opacity:0;transition:.3s;pointer-events:none}
   .toast.show{opacity:1}
+  .lock{position:fixed;inset:0;z-index:100;background:var(--bg);display:none;align-items:center;justify-content:center;padding:20px}
+  .lockcard{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:30px;width:100%;max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,.25);text-align:center}
+  .lockcard .lockmk{width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#1a73e8,#34a853);color:#fff;display:flex;align-items:center;justify-content:center;margin:0 auto 14px}
+  .lockcard h2{font-size:19px}
+  .lockcard p{color:var(--muted);font-size:13px;margin-bottom:16px}
+  .lockcard label{display:block;text-align:left;font-size:12.5px;font-weight:600;margin:12px 0 6px}
+  .lockcard input[type=text],.lockcard input[type=password]{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:15px;font-family:inherit;background:var(--card);color:var(--ink)}
+  .lrow{display:flex;align-items:center;gap:8px;margin:14px 0 18px;font-size:13px}
+  .lrow label{margin:0;font-weight:500}
+  .lerr{display:none;color:var(--red);font-size:13px;margin-top:12px}
 
   .mobtog{display:none}
   @media(max-width:860px){
@@ -294,6 +415,20 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
 </style>
 </head>
 <body>
+<div id="lock" class="lock">
+  <form id="loginForm" class="lockcard" autocomplete="on">
+    <div class="lockmk"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9h4"/><line x1="18" y1="14" x2="10" y2="14"/><line x1="15" y1="18" x2="10" y2="18"/><path d="M10 6h8v4h-8z"/></svg></div>
+    <h2>Portal · Google Workspace</h2>
+    <p>Acceso privado</p>
+    <label for="luser">Usuario</label>
+    <input id="luser" type="text" autocomplete="username" required>
+    <label for="lpass">Contraseña</label>
+    <input id="lpass" type="password" autocomplete="current-password" required>
+    <div class="lrow"><input type="checkbox" id="lremember"><label for="lremember">Recordarme en este dispositivo</label></div>
+    <button class="btn primary" type="submit" style="width:100%">Entrar</button>
+    <div id="loginErr" class="lerr">Usuario o contraseña incorrectos.</div>
+  </form>
+</div>
 <div class="app">
   <aside class="side">
     <div class="brand"><div class="mk" id="brandMk"></div><div><b>Portal Workspace</b><small>Noticias diarias</small></div></div>
@@ -302,6 +437,7 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
     <div class="foot">
       <button class="gearbtn" id="themeToggle"><span class="bi"></span> <span class="bt">Tema oscuro</span></button>
       <button class="gearbtn" id="openSettings" style="margin-top:6px"><span class="bi"></span> <span>Ajustes (IA · Groq)</span></button>
+      <button class="gearbtn" id="logoutBtn" style="margin-top:6px;display:none"><span class="bi"></span> <span>Cerrar sesión</span></button>
       <div class="updated" id="updated"></div>
     </div>
   </aside>
@@ -329,6 +465,9 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
       <button class="btn ghost" id="closeSettings" style="margin-left:auto">Cerrar</button>
     </div>
     <div class="hint">Consigue una clave gratis en console.groq.com. La traducción ocurre en tu navegador; si tu clave o la red fallan, las noticias se muestran en su idioma original.</div>
+    <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
+      <button class="btn ghost" id="restoreHidden">Restaurar tarjetas ocultas</button>
+    </div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -336,14 +475,22 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
 <script id="news-data" type="application/json"></script>
 <script>
 (function(){
-  var DATA = /*__DATA__*/null;
+  var PLAIN = /*__DATA__*/null;
+  var ENC = /*__ENC__*/null;
+  // tema temprano (también en la pantalla de acceso)
+  try{var _t=localStorage.getItem('wsnews_theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');document.documentElement.setAttribute('data-theme',_t);}catch(e){}
+
+  function boot(DATA){
   var SECTIONS = [
     {key:'novedades', label:'Novedades', icon:'zap',       desc:'Anuncios directos de las páginas oficiales de Google Workspace.'},
     {key:'noticias',  label:'Noticias',  icon:'newspaper', desc:'Cobertura de otras webs de tecnología sobre Google Workspace.'},
-    {key:'videos',    label:'Videos',    icon:'video',     desc:'Videos recientes de YouTube sobre novedades y tips de Workspace.'},
-    {key:'empresas',  label:'Empresas',  icon:'briefcase', desc:'Empresas y organizaciones que adoptan o usan Google Workspace.'}
+    {key:'videos',    label:'Videos',    icon:'video',     desc:'Videos recientes de YouTube (máximo una semana de antigüedad).'},
+    {key:'drive',     label:'Google Drive', icon:'harddrive', desc:'Novedades y noticias específicas de Google Drive.'},
+    {key:'unidades',  label:'Unidades compartidas', icon:'users', desc:'Novedades sobre las Unidades compartidas (Shared Drives).'},
+    {key:'empresas',  label:'Empresas',  icon:'briefcase', desc:'Empresas y organizaciones que adoptan o usan Google Workspace.'},
+    {key:'favoritos', label:'Favoritos', icon:'star',      desc:'Tus artículos y videos guardados. Se guardan en este navegador.'}
   ];
-  var SECTION_ICON={novedades:'zap',noticias:'newspaper',videos:'video',empresas:'briefcase'};
+  var SECTION_ICON={novedades:'zap',noticias:'newspaper',videos:'video',drive:'harddrive',unidades:'users',empresas:'briefcase',favoritos:'star'};
   var ICONS={
     newspaper:'<path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9h4"/><line x1="18" y1="14" x2="10" y2="14"/><line x1="15" y1="18" x2="10" y2="18"/><path d="M10 6h8v4h-8z"/>',
     zap:'<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
@@ -351,7 +498,12 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
     briefcase:'<rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>',
     settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
     moon:'<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
-    sun:'<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'
+    sun:'<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
+    harddrive:'<line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/>',
+    users:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    star:'<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+    x:'<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+    logout:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'
   };
   function ic(name,size){size=size||20;return '<svg viewBox="0 0 24 24" width="'+size+'" height="'+size+'" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block">'+(ICONS[name]||'')+'</svg>';}
   document.getElementById('brandMk').innerHTML=ic('newspaper',20);
@@ -361,6 +513,39 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
     set:function(k,v){try{localStorage.setItem(k,v);}catch(e){}},
     del:function(k){try{localStorage.removeItem(k);}catch(e){}}
   };
+  // ---- favoritos y ocultos (guardados en el navegador) ----
+  var FAVK='wsnews_favs', HIDK='wsnews_hidden';
+  function getObj(k){try{return JSON.parse(LS.get(k)||'{}');}catch(e){return {};}}
+  function setObj(k,o){LS.set(k,JSON.stringify(o));}
+  function favs(){return getObj(FAVK);}
+  function hidden(){return getObj(HIDK);}
+  function isFav(id){return !!favs()[id];}
+  function isHidden(id){return !!hidden()[id];}
+  function toggleFav(item){var f=favs();var id=idOf(item);if(f[id])delete f[id];else f[id]=item;setObj(FAVK,f);updateCounts();}
+  function hideItem(id){var h=hidden();h[id]=1;setObj(HIDK,h);}
+  function unhideAll(){setObj(HIDK,{});}
+  function count(key){
+    if(key==='favoritos')return Object.keys(favs()).length;
+    return (DATA[key]||[]).filter(function(it){return !isHidden(idOf(it));}).length;
+  }
+  function updateCounts(){document.querySelectorAll('.nav a').forEach(function(a){var c=a.querySelector('.ct');if(c)c.textContent=count(a.dataset.k);});}
+  function makeActions(item,mode){
+    var wrap=document.createElement('div');wrap.className='actions';
+    var id=idOf(item);
+    var fav=document.createElement('button');fav.className='abtn fav'+((mode==='fav'||isFav(id))?' on':'');
+    fav.title=(mode==='fav'?'Quitar de favoritos':'Guardar en favoritos');fav.innerHTML=ic('star',15);
+    fav.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();
+      toggleFav(item);
+      if(mode==='fav'){drawFavs();}else{fav.classList.toggle('on');}
+    });
+    wrap.appendChild(fav);
+    if(mode!=='fav'){
+      var hb=document.createElement('button');hb.className='abtn';hb.title='Ocultar esta tarjeta';hb.innerHTML=ic('x',15);
+      hb.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();hideItem(id);draw();updateCounts();});
+      wrap.appendChild(hb);
+    }
+    return wrap;
+  }
   var state={sec:'novedades',range:'all'};
   var content=document.getElementById('content');
   var nav=document.getElementById('nav');
@@ -368,7 +553,7 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
   // ---- nav ----
   SECTIONS.forEach(function(s){
     var a=document.createElement('a');a.dataset.k=s.key;
-    var n=(DATA[s.key]||[]).length;
+    var n=count(s.key);
     a.innerHTML='<span class="ic">'+ic(s.icon,19)+'</span><span>'+s.label+'</span><span class="ct">'+n+'</span>';
     a.addEventListener('click',function(){go(s.key);});
     nav.appendChild(a);
@@ -378,11 +563,11 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
 
   function parse(d){var p=(d||'').split('-');return new Date(+p[0],+p[1]-1,+p[2]);}
   function fmtDate(d){if(!d)return '';return parse(d).toLocaleDateString('es-MX',{day:'numeric',month:'short'});}
+  function ymd(dt){return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');}
   function inRange(date){
     if(state.range==='all'||!date)return true;
-    var diff=Math.round((new Date()-parse(date))/86400000);
-    if(state.range==='today')return diff<=1;
-    if(state.range==='week')return diff<7;
+    if(state.range==='today')return date===ymd(new Date());
+    if(state.range==='week'){var w=new Date();w.setDate(w.getDate()-6);return date>=ymd(w);}
     return true;
   }
   function esc(s){return (s||'');}
@@ -394,7 +579,7 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
     document.getElementById('secTitle').innerHTML='<span style="display:inline-flex">'+ic(s.icon,22)+'</span> '+s.label;
     document.getElementById('secDesc').textContent=s.desc;
     var f=document.getElementById('filters');
-    if(key==='videos'){f.innerHTML='';}
+    if(key==='videos'||key==='favoritos'){f.innerHTML='';}
     else{
       f.innerHTML='';
       [['all','Todo'],['week','Esta semana'],['today','Hoy']].forEach(function(r){
@@ -409,20 +594,22 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
   function draw(){
     var key=state.sec;
     if(key==='videos')return drawVideos();
-    var items=(DATA[key]||[]).filter(function(it){return inRange(it.date);});
+    if(key==='favoritos')return drawFavs();
+    var items=(DATA[key]||[]).filter(function(it){return inRange(it.date)&&!isHidden(idOf(it));});
     content.innerHTML='';
-    if(!items.length){content.innerHTML=emptyBox('Aún no hay elementos en esta sección. Se llenará en la próxima actualización diaria.');return;}
+    if(!items.length){content.innerHTML=emptyBox(state.range==='all'?'Aún no hay elementos en esta sección. Se llenará en la próxima actualización diaria.':(state.range==='today'?'No hay noticias de hoy en esta sección. Prueba con "Esta semana" o "Todo".':'No hay noticias de esta semana en esta sección. Prueba con "Todo".'));return;}
     var g=document.createElement('div');g.className='grid';
     items.forEach(function(it){g.appendChild(newsCard(it));});
     content.appendChild(g);
     maybeTranslate(items);
   }
 
-  function newsCard(it){
+  function newsCard(it,mode){
     var a=document.createElement('a');a.className='card';a.href=it.url;a.target='_blank';a.rel='noopener';a.dataset.id=idOf(it);
     var banner=document.createElement('div');banner.className='banner';
     banner.style.background='linear-gradient(135deg,'+(it.accent||'#1a73e8')+'22,'+(it.accent||'#1a73e8')+'55)';
     var tg=document.createElement('span');tg.className='tag';tg.textContent=it.source||'';banner.appendChild(tg);
+    banner.appendChild(makeActions(it,mode));
     function addIcon(){var s=document.createElement('span');s.className='ic';s.style.color=(it.accent||'#1a73e8');s.innerHTML=ic(SECTION_ICON[it.section]||'newspaper',38);banner.appendChild(s);}
     if(it.image){var img=document.createElement('img');img.loading='lazy';img.src=it.image;img.onerror=function(){img.remove();addIcon();};banner.appendChild(img);}else{addIcon();}
     var body=document.createElement('div');body.className='cardbody';
@@ -439,36 +626,56 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
     return a;
   }
 
-  function drawVideos(){
-    var vids=DATA.videos||[];
-    content.innerHTML='';
-    if(!vids.length){content.innerHTML=emptyBox('Los videos se cargan automáticamente en la primera ejecución del workflow (búsqueda en YouTube).');return;}
-    var g=document.createElement('div');g.className='vgrid';
-    vids.forEach(function(v){
-      var c=document.createElement('div');c.className='vcard';
-      var th=document.createElement('div');th.className='vthumb';
-      var img=document.createElement('img');img.loading='lazy';img.src='https://img.youtube.com/vi/'+v.videoId+'/hqdefault.jpg';
-      var play=document.createElement('div');play.className='play';play.innerHTML='<span></span>';
-      th.appendChild(img);th.appendChild(play);
-      th.addEventListener('click',function(){
-        var f=document.createElement('iframe');
-        f.src='https://www.youtube.com/embed/'+v.videoId+'?autoplay=1&rel=0';
-        f.allow='accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture';
-        f.allowFullscreen=true;
-        c.replaceChild(f,th);
-      });
-      var m=document.createElement('div');m.className='vmeta';
-      var h=document.createElement('h3');h.textContent=v.title;
-      var ch=document.createElement('div');ch.className='ch';ch.textContent=(v.channel||'')+(v.when?(' · '+v.when):'');
-      m.appendChild(h);m.appendChild(ch);
-      c.appendChild(th);c.appendChild(m);
-      g.appendChild(c);
+  function agoText(v){
+    if(v.publishedDate){var d=Math.max(0,Math.floor((Date.now()-new Date(v.publishedDate+'T00:00:00').getTime())/86400000));
+      return d===0?'publicado hoy':(d===1?'hace 1 día':'hace '+d+' días');}
+    return v.when||'';
+  }
+  function videoCard(v,mode,isNew){
+    var c=document.createElement('div');c.className='vcard';
+    var th=document.createElement('div');th.className='vthumb';
+    var img=document.createElement('img');img.loading='lazy';img.src='https://img.youtube.com/vi/'+v.videoId+'/hqdefault.jpg';
+    var play=document.createElement('div');play.className='play';play.innerHTML='<span></span>';
+    th.appendChild(img);th.appendChild(play);
+    if(isNew){var nb=document.createElement('span');nb.className='vhead nuevo';nb.textContent='Nuevo';th.appendChild(nb);}
+    th.appendChild(makeActions(v,mode));
+    th.addEventListener('click',function(e){
+      if(e.target.closest('.actions'))return;
+      var f=document.createElement('iframe');
+      f.src='https://www.youtube.com/embed/'+v.videoId+'?autoplay=1&rel=0';
+      f.allow='accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture';
+      f.allowFullscreen=true;
+      c.replaceChild(f,th);
     });
+    var m=document.createElement('div');m.className='vmeta';
+    var h=document.createElement('h3');h.textContent=v.title;
+    var ch=document.createElement('div');ch.className='ch';ch.textContent=(v.channel||'');
+    var ag=document.createElement('div');ag.className='vage';ag.textContent=agoText(v);
+    m.appendChild(h);m.appendChild(ch);m.appendChild(ag);
+    c.appendChild(th);c.appendChild(m);
+    return c;
+  }
+  function drawVideos(){
+    var vids=(DATA.videos||[]).filter(function(v){return !isHidden(idOf(v));});
+    content.innerHTML='';
+    if(!vids.length){content.innerHTML=emptyBox('Los videos se cargan automáticamente en la próxima ejecución del workflow (búsqueda en YouTube, máximo una semana de antigüedad).');return;}
+    var maxFirst=vids.reduce(function(a,v){return (v.firstSeen&&v.firstSeen>a)?v.firstSeen:a;},'');
+    var g=document.createElement('div');g.className='vgrid';
+    vids.forEach(function(v){g.appendChild(videoCard(v,null,v.firstSeen===maxFirst));});
     content.appendChild(g);
+  }
+  function drawFavs(){
+    var f=favs();var ids=Object.keys(f);
+    content.innerHTML='';
+    if(!ids.length){content.innerHTML=emptyBox('Aún no tienes favoritos. Toca la estrella en cualquier artículo o video para guardarlo aquí.');return;}
+    var articles=[],videos=[];
+    ids.forEach(function(id){var it=f[id];if(it.videoId)videos.push(it);else articles.push(it);});
+    if(articles.length){var g=document.createElement('div');g.className='grid';articles.forEach(function(it){g.appendChild(newsCard(it,'fav'));});content.appendChild(g);}
+    if(videos.length){var sep=document.createElement('div');sep.className='favsep';sep.textContent='Videos guardados';content.appendChild(sep);var vg=document.createElement('div');vg.className='vgrid';videos.forEach(function(v){vg.appendChild(videoCard(v,'fav',false));});content.appendChild(vg);}
   }
 
   function emptyBox(msg){return '<div class="empty"><div class="big">'+ic('newspaper',40)+'</div>'+msg+'</div>';}
-  function idOf(it){var s=(it.url||it.title||'');var h=0;for(var i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))>>>0;}return 'i'+h;}
+  function idOf(it){if(it&&it.videoId)return 'v'+it.videoId;var s=(it.url||'')+'|'+(it.title||'');var h=0;for(var i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))>>>0;}return 'i'+h;}
 
   // ---- Groq (traducción en el navegador) ----
   var GKEY='wsnews_groq_key', GAUTO='wsnews_groq_auto', GCACHE='wsnews_tr_';
@@ -531,6 +738,9 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
   document.getElementById('clearKey').addEventListener('click',function(){
     LS.del(GKEY);document.getElementById('gk').value='';toast('Clave borrada.');
   });
+  document.getElementById('restoreHidden').addEventListener('click',function(){
+    unhideAll();ov.classList.remove('open');updateCounts();draw();toast('Se restauraron las tarjetas ocultas.');
+  });
 
   // ---- tema claro / oscuro ----
   var THKEY='wsnews_theme';
@@ -547,7 +757,45 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
     LS.set(THKEY,cur);applyTheme(cur);
   });
 
+  // ---- cerrar sesión (solo si el portal está protegido) ----
+  if(ENC){
+    var lo=document.getElementById('logoutBtn');
+    if(lo){lo.style.display='';lo.querySelector('.bi').innerHTML=ic('logout',17);
+      lo.addEventListener('click',function(){try{localStorage.removeItem('wsnews_cred');}catch(e){}location.reload();});}
+  }
+
   go('novedades');
+  } /* ===== fin boot ===== */
+
+  // ---- descifrado en el navegador (WebCrypto) ----
+  function b64buf(b64){var s=atob(b64);var u=new Uint8Array(s.length);for(var i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u.buffer;}
+  function decryptWith(user,pass){
+    var e=new TextEncoder();
+    return crypto.subtle.importKey('raw',e.encode(user+'\n'+pass),'PBKDF2',false,['deriveKey'])
+      .then(function(base){return crypto.subtle.deriveKey({name:'PBKDF2',salt:b64buf(ENC.salt),iterations:150000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);})
+      .then(function(key){return crypto.subtle.decrypt({name:'AES-GCM',iv:b64buf(ENC.iv)},key,b64buf(ENC.data));})
+      .then(function(pt){return JSON.parse(new TextDecoder().decode(pt));});
+  }
+  function initLogin(){
+    var lock=document.getElementById('lock'); lock.style.display='flex';
+    var form=document.getElementById('loginForm');
+    var err=document.getElementById('loginErr');
+    var btn=form.querySelector('button[type=submit]');
+    function attempt(u,pw,remember){
+      btn.disabled=true; err.style.display='none';
+      return decryptWith(u,pw).then(function(data){
+        if(remember){try{localStorage.setItem('wsnews_cred',JSON.stringify({u:u,p:pw}));}catch(e){}}
+        if(lock.parentNode)lock.parentNode.removeChild(lock); boot(data);
+      }).catch(function(){err.style.display='block';btn.disabled=false;});
+    }
+    form.addEventListener('submit',function(ev){ev.preventDefault();
+      attempt(document.getElementById('luser').value.trim(),document.getElementById('lpass').value,document.getElementById('lremember').checked);});
+    try{var c=JSON.parse(localStorage.getItem('wsnews_cred')||'null');if(c&&c.u&&c.p){attempt(c.u,c.p,true);}}catch(e){}
+  }
+
+  // ---- arranque ----
+  if(ENC && window.crypto && crypto.subtle){ initLogin(); }
+  else { var l=document.getElementById('lock'); if(l&&l.parentNode)l.parentNode.removeChild(l); boot(PLAIN||{novedades:[],noticias:[],empresas:[],drive:[],unidades:[],videos:[]}); }
 })();
 </script>
 </body>

@@ -5,8 +5,18 @@ del ecosistema Google Workspace, organizado en secciones con menú lateral:
 
 - **Novedades** — anuncios directos de las páginas oficiales de Google.
 - **Noticias** — cobertura de otras webs de tecnología.
-- **Videos** — videos recientes de YouTube (búsqueda automática), embebidos en la misma página.
+- **Videos** — videos recientes de YouTube (búsqueda automática), embebidos en la página. Solo se
+  muestran videos de **máximo una semana** de antigüedad, ordenados del más nuevo al más viejo, y los
+  recién agregados llevan una etiqueta **NUEVO**.
+- **Google Drive** — novedades y noticias específicas de Google Drive.
+- **Unidades compartidas** — novedades sobre las Unidades compartidas (Shared Drives).
 - **Empresas** — organizaciones que adoptan o usan Google Workspace.
+- **Favoritos** — tus artículos y videos guardados (con la estrella ⭐ de cada tarjeta). Se guardan en
+  tu navegador.
+
+Además, cada tarjeta tiene un botón para **ocultarla** (✕) si no quieres verla; puedes restaurar las
+ocultas desde **Ajustes**. Todo esto (favoritos, ocultos, tema y clave de Groq) vive solo en tu
+navegador.
 
 Cada noticia trae su imagen y enlace a la fuente; los videos se ven dentro del sitio. Hay filtros
 por periodo (Todo / Esta semana / Hoy), **interruptor de tema claro/oscuro** (con memoria), iconos
@@ -81,6 +91,31 @@ funciona igual, con los titulares en su idioma original.
 > sin romperse.
 
 ---
+
+## Acceso privado con usuario y contraseña (opcional)
+
+El portal puede quedar **protegido** para que solo tú entres, sin que la contraseña esté en el
+código. Funciona cifrando el contenido: el repo guarda solo **texto cifrado** (AES-256-GCM) y tu
+usuario+contraseña son la llave que lo descifra **en tu navegador**. Como GitHub Pages es público,
+esta es la única forma real de protegerlo: sin las credenciales, nadie puede leer nada aunque baje
+los archivos.
+
+Para activarlo, agrega dos secrets en el repo (**Settings → Secrets and variables → Actions**):
+
+- `PORTAL_USER` → el usuario que quieras
+- `PORTAL_PASSWORD` → la contraseña que quieras
+
+En la siguiente corrida del workflow, el sitio se genera cifrado y pedirá login. La contraseña
+**no** queda escrita en el repo ni en la web: solo vive como secret (cifrado, invisible) para que el
+trabajo diario pueda re-cifrar el contenido nuevo.
+
+- Para **cambiar** la contraseña: edita los secrets y vuelve a correr el workflow.
+- Para **quitar** el login: borra los dos secrets y corre el workflow (vuelve a modo público).
+- En la pantalla de acceso puedes marcar "Recordarme en este dispositivo" para no escribirla cada
+  vez (se guarda solo en tu navegador). El botón "Cerrar sesión" del menú la olvida.
+
+> Nota: requiere HTTPS para el descifrado (GitHub Pages ya usa HTTPS, así que funciona). Si abres el
+> `index.html` cifrado como archivo local (file://), el navegador no permite descifrar.
 
 ## Notas
 

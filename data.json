@@ -1,5 +1,5 @@
 {
-  "updatedISO": "2026-07-17T17:48:15.151Z",
+  "updatedISO": "2026-07-18T17:21:56.417Z",
   "novedades": [
     {
       "section": "novedades",
@@ -126,5 +126,18 @@
       "accent": "#34a853"
     }
   ],
+  "drive": [
+    {
+      "section": "drive",
+      "title": "\"Ask Gemini\" llega a la app de Drive en móvil",
+      "summary": "La función para preguntarle a Gemini sobre tus archivos, antes solo en web, ya está disponible en las apps de Google Drive para iOS y Android.",
+      "url": "https://workspaceupdates.googleblog.com/2026/07/weekly-recap-07-03-2026.html",
+      "source": "Google Workspace Updates",
+      "image": "",
+      "date": "2026-07-17",
+      "accent": "#0f9d58"
+    }
+  ],
+  "unidades": [],
   "videos": []
 }
