@@ -33,6 +33,8 @@ jobs:
       - name: Generar portal
         env:
           SITE_URL: "https://jairocarrizales.github.io/workspace-news/"
+          PORTAL_USER: ${{ secrets.PORTAL_USER }}
+          PORTAL_PASSWORD: ${{ secrets.PORTAL_PASSWORD }}
         run: node scripts/generate.mjs
 
       - name: Leer novedades
