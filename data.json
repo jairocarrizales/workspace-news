@@ -1,5 +1,5 @@
 {
-  "updatedISO": "2026-07-18T14:22:08.573Z",
+  "updatedISO": "2026-07-19T02:45:28.021Z",
   "novedades": [
     {
       "section": "novedades",
@@ -191,6 +191,16 @@
       "image": "",
       "source": "Northeast Times",
       "date": "2026-07-17",
+      "accent": "#a142f4"
+    },
+    {
+      "section": "noticias",
+      "title": "Prompt attacks on the Gemini AI-assistant and Google Workspace with Gemini - Kaspersky",
+      "summary": "<a href=\"https://news.google.com/rss/articles/CBMib0FVX3lxTE5GT2ZXbk5xZEZGNjJLamNxeGhNU0NOM0hWSEh4dUFUTHpqLTFGMktTSjdpMU1vM3N3OVpvNHB1elNzSHlFa1lEM0VNajFsR1RVYnFlTXZReWRtY0lObFFZNlQ5dzd0b28yZ2pTTTFBcw?oc=5\" target=\"_blank\">Prompt attacks on the Gemini AI-assistant and Google Workspace with Gemini</a",
+      "url": "https://news.google.com/rss/articles/CBMib0FVX3lxTE5GT2ZXbk5xZEZGNjJLamNxeGhNU0NOM0hWSEh4dUFUTHpqLTFGMktTSjdpMU1vM3N3OVpvNHB1elNzSHlFa1lEM0VNajFsR1RVYnFlTXZReWRtY0lObFFZNlQ5dzd0b28yZ2pTTTFBcw?oc=5",
+      "image": "",
+      "source": "Kaspersky",
+      "date": "2026-07-16",
       "accent": "#a142f4"
     },
     {
@@ -469,16 +479,6 @@
       "when": "hace 1 día",
       "url": "https://www.youtube.com/watch?v=N4lTr1jB9u4",
       "publishedDate": "2026-07-16",
-      "firstSeen": "2026-07-17"
-    },
-    {
-      "section": "videos",
-      "videoId": "RKaqSP9rpBo",
-      "title": "El ÚNICO tutorial de Google Workspace para empresas que necesitas en 2026: ¡Cómo usarlo PASO A PASO!",
-      "channel": "ImminentHD",
-      "when": "hace 6 días",
-      "url": "https://www.youtube.com/watch?v=RKaqSP9rpBo",
-      "publishedDate": "2026-07-11",
       "firstSeen": "2026-07-17"
     }
   ]
