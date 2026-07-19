@@ -171,6 +171,7 @@ function ageDaysFromText(t) {
 }
 
 function mergeSection(existing, fresh, capN) {
+  const lim = cutoff();
   const seen = new Set(existing.map(keyOf));
   const news = [];
   for (const n of fresh) {
@@ -180,10 +181,14 @@ function mergeSection(existing, fresh, capN) {
     const t = THEME[n.section]; if (t) n.accent = t.accent;
     news.push(n);
   }
-  const lim = cutoff();
-  const all = [...news, ...existing].filter(x => (x.date || '9999') >= lim);
+  // Conserva SIEMPRE lo nuevo (aunque sea de hace tiempo); solo envejece lo ya acumulado.
+  const all = [...news, ...existing.filter(x => (x.date || '9999') >= lim)];
   all.sort((a, b) => (a.date < b.date ? 1 : -1));
-  return { list: all.slice(0, capN), added: news.length, newItems: news };
+  const list = all.slice(0, capN);
+  // Cuenta como "nuevo" (para el correo) solo lo que realmente quedó visible en el panel.
+  const kept = new Set(list.map(keyOf));
+  const newItems = news.filter(n => kept.has(keyOf(n)));
+  return { list, added: newItems.length, newItems };
 }
 
 function mergeVideos(existing, fresh) {
@@ -324,6 +329,10 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
   /* Main */
   .main{flex:1;min-width:0;display:flex;flex-direction:column}
   .topbar{position:sticky;top:0;z-index:15;background:var(--topbar);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:20px 30px 16px}
+  .searchbar{display:flex;align-items:center;gap:9px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 13px;margin-bottom:14px;max-width:520px}
+  .searchbar .si{display:inline-flex;color:var(--muted);flex:0 0 auto}
+  .searchbar input{border:0;outline:0;background:transparent;color:var(--ink);font-size:14.5px;font-family:inherit;width:100%}
+  .searchbar input::placeholder{color:var(--muted)}
   .topbar h1{font-size:22px;font-weight:600;display:flex;align-items:center;gap:10px}
   .topbar p{color:var(--muted);font-size:13.5px;margin-top:3px}
   .filters{display:flex;gap:7px;margin-top:13px;flex-wrap:wrap}
@@ -444,6 +453,7 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
 
   <div class="main">
     <div class="topbar">
+      <div class="searchbar"><span class="si" id="searchIc"></span><input id="search" type="search" placeholder="Buscar en todo el portal…" autocomplete="off"></div>
       <h1 id="secTitle"></h1>
       <p id="secDesc"></p>
       <div class="filters" id="filters"></div>
@@ -503,7 +513,8 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
     users:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
     star:'<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
     x:'<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
-    logout:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'
+    logout:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+    search:'<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'
   };
   function ic(name,size){size=size||20;return '<svg viewBox="0 0 24 24" width="'+size+'" height="'+size+'" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block">'+(ICONS[name]||'')+'</svg>';}
   document.getElementById('brandMk').innerHTML=ic('newspaper',20);
@@ -574,6 +585,7 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
 
   function go(key){
     state.sec=key;state.range='all';
+    var _sb=document.getElementById('search'); if(_sb) _sb.value='';
     var s=SECTIONS.find(function(x){return x.key===key;});
     document.querySelectorAll('.nav a').forEach(function(a){a.classList.toggle('active',a.dataset.k===key);});
     document.getElementById('secTitle').innerHTML='<span style="display:inline-flex">'+ic(s.icon,22)+'</span> '+s.label;
@@ -674,6 +686,26 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
     if(videos.length){var sep=document.createElement('div');sep.className='favsep';sep.textContent='Videos guardados';content.appendChild(sep);var vg=document.createElement('div');vg.className='vgrid';videos.forEach(function(v){vg.appendChild(videoCard(v,'fav',false));});content.appendChild(vg);}
   }
 
+  function drawSearch(q){
+    var ql=q.toLowerCase();
+    document.querySelectorAll('.nav a').forEach(function(a){a.classList.remove('active');});
+    document.getElementById('secTitle').innerHTML='<span style="display:inline-flex">'+ic('search',22)+'</span> Resultados';
+    document.getElementById('secDesc').textContent='Coincidencias en todo el portal para “'+q+'”.';
+    document.getElementById('filters').innerHTML='';
+    content.innerHTML='';
+    function m(t){return (t||'').toLowerCase().indexOf(ql)>=0;}
+    var arts=[],vids=[],seen={};
+    SECTIONS.forEach(function(s){
+      if(s.key==='videos'||s.key==='favoritos')return;
+      (DATA[s.key]||[]).forEach(function(it){var id=idOf(it);if(seen[id]||isHidden(id))return;if(m(it.title)||m(it.summary)||m(it.source)){seen[id]=1;arts.push(it);}});
+    });
+    (DATA.videos||[]).forEach(function(v){if(isHidden(idOf(v)))return;if(m(v.title)||m(v.channel))vids.push(v);});
+    if(!arts.length&&!vids.length){content.innerHTML=emptyBox('Sin resultados para “'+q+'”.');return;}
+    if(arts.length){var g=document.createElement('div');g.className='grid';arts.forEach(function(it){g.appendChild(newsCard(it));});content.appendChild(g);}
+    if(vids.length){var sep=document.createElement('div');sep.className='favsep';sep.textContent='Videos';content.appendChild(sep);var vg=document.createElement('div');vg.className='vgrid';vids.forEach(function(v){vg.appendChild(videoCard(v,null,false));});content.appendChild(vg);}
+    maybeTranslate(arts);
+  }
+
   function emptyBox(msg){return '<div class="empty"><div class="big">'+ic('newspaper',40)+'</div>'+msg+'</div>';}
   function idOf(it){if(it&&it.videoId)return 'v'+it.videoId;var s=(it.url||'')+'|'+(it.title||'');var h=0;for(var i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))>>>0;}return 'i'+h;}
 
@@ -756,6 +788,11 @@ const TEMPLATE = String.raw`<!DOCTYPE html>
     var cur=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';
     LS.set(THKEY,cur);applyTheme(cur);
   });
+
+  // ---- buscador general ----
+  document.getElementById('searchIc').innerHTML=ic('search',17);
+  var searchBox=document.getElementById('search');
+  searchBox.addEventListener('input',function(){var q=searchBox.value.trim();if(q)drawSearch(q);else draw();});
 
   // ---- cerrar sesión (solo si el portal está protegido) ----
   if(ENC){
